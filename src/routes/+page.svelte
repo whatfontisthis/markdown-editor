@@ -94,6 +94,7 @@
       file.path = path;
       file.content = content;
       file.saved = content;
+      mode = 'view';
     } catch (err) {
       console.error('Open failed:', err);
       alert(`Open failed: ${err}`);

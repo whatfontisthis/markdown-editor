@@ -55,6 +55,6 @@ jobs:
             See the attached assets for Windows (`.msi`, `.exe`) and macOS (`.dmg`) installers.
 
             Unsigned builds — Windows SmartScreen / macOS Gatekeeper will warn on first launch.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

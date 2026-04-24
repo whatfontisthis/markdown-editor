@@ -1,0 +1,92 @@
+/* Apple System Colors (Ghostty palette).
+   Dark variant = Ghostty "Apple System Colors" theme verbatim.
+   Light variant = Ghostty dim palette (0–7) + Apple Any-Appearance neutrals. */
+
+:root {
+  --zoom: 1;
+
+  /* Apple Any-Appearance neutrals */
+  --bg: #ffffff;
+  --bg-alt: #f5f5f7;
+  --fg: #1d1d1f;
+  --fg-muted: #6e6e73;
+  --border: #d2d2d7;
+  --code-bg: #f5f5f7;
+  --titlebar-bg: #f5f5f7;
+
+  /* Ghostty palette 0–7 (dim) — readable on light backgrounds */
+  --ans-black:   #1a1a1a;
+  --ans-red:     #cc372e;
+  --ans-green:   #26a439;
+  --ans-yellow:  #cdac08;
+  --ans-blue:    #0869cb;
+  --ans-magenta: #9647bf;
+  --ans-cyan:    #479ec2;
+  --ans-gray:    #86868b;
+
+  --accent: var(--ans-blue);
+
+  --hl-keyword:  var(--ans-red);
+  --hl-string:   var(--ans-green);
+  --hl-comment:  var(--ans-gray);
+  --hl-number:   var(--ans-yellow);
+  --hl-function: var(--ans-blue);
+  --hl-variable: var(--ans-magenta);
+  --hl-type:     var(--ans-cyan);
+}
+
+:root[data-theme="dark"] {
+  /* Ghostty dark theme neutrals (verbatim) */
+  --bg: #1e1e1e;
+  --bg-alt: #2c2c2e;
+  --fg: #ffffff;
+  --fg-muted: #98989d;
+  --border: #464646;
+  --code-bg: #2c2c2e;
+  --titlebar-bg: #1c1c1e;
+
+  /* Ghostty palette 8–15 (bright) = Apple Dark-Appearance system colors */
+  --ans-black:   #464646;
+  --ans-red:     #ff453a;
+  --ans-green:   #32d74b;
+  --ans-yellow:  #ffd60a;
+  --ans-blue:    #0a84ff;
+  --ans-magenta: #bf5af2;
+  --ans-cyan:    #76d6ff;
+  --ans-gray:    #98989d;
+
+  --accent: var(--ans-blue);
+
+  --hl-keyword:  var(--ans-red);
+  --hl-string:   var(--ans-green);
+  --hl-comment:  var(--ans-gray);
+  --hl-number:   var(--ans-yellow);
+  --hl-function: var(--ans-blue);
+  --hl-variable: var(--ans-magenta);
+  --hl-type:     var(--ans-cyan);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+* { box-sizing: border-box; }
+
+/* highlight.js tokens via our palette */
+.hljs { color: var(--fg); background: transparent; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hl-keyword); }
+.hljs-string, .hljs-attr, .hljs-regexp, .hljs-addition, .hljs-meta-string { color: var(--hl-string); }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
+.hljs-function, .hljs-title, .hljs-title.function_ { color: var(--hl-function); }
+.hljs-variable, .hljs-template-variable, .hljs-attribute, .hljs-name { color: var(--hl-variable); }
+.hljs-type, .hljs-class, .hljs-title.class_, .hljs-built_in, .hljs-tag { color: var(--hl-type); }
+.hljs-deletion { color: var(--hl-keyword); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }

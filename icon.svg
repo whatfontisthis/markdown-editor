@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" rx="224" fill="#1d1d1f"/>
+  <text
+    x="512"
+    y="630"
+    text-anchor="middle"
+    font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    font-weight="800"
+    font-size="420"
+    fill="#ffffff"
+    letter-spacing="-14"
+  >.md</text>
+</svg>

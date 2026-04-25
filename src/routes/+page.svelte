@@ -3,11 +3,20 @@
   import Editor from '$lib/Editor.svelte';
   import Preview from '$lib/Preview.svelte';
   import Icon from '$lib/Icon.svelte';
-  import { file, baseName } from '$lib/fileState.svelte';
+  import {
+    file,
+    baseName,
+    tabs,
+    newTab,
+    closeTab,
+    activateTab,
+    openTabForFile
+  } from '$lib/fileState.svelte';
   import { theme, applyTheme, toggleTheme } from '$lib/theme.svelte';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { zoom, applyZoom, zoomIn, zoomOut, zoomReset, zoomTick } from '$lib/zoom.svelte';
 
   type PaneApi = { scrollToLine: (line: number) => void };
@@ -81,7 +90,6 @@
 
   async function openFile(path?: string | null) {
     try {
-      if (!(await confirmDiscard())) return;
       if (!path) {
         const chosen = await open({
           multiple: false,
@@ -91,9 +99,7 @@
         if (!path) return;
       }
       const content = await invoke<string>('read_text_file', { path });
-      file.path = path;
-      file.content = content;
-      file.saved = content;
+      openTabForFile(path, content);
       mode = 'view';
     } catch (err) {
       console.error('Open failed:', err);
@@ -102,11 +108,17 @@
   }
 
   async function newFile() {
-    if (!(await confirmDiscard())) return;
-    file.path = null;
-    file.content = '';
-    file.saved = '';
+    newTab(null, '');
     mode = 'edit';
+  }
+
+  async function requestCloseTab(id: string) {
+    const t = tabs.items.find((x) => x.id === id);
+    if (!t) return;
+    if (t.content !== t.saved) {
+      if (!confirm(`Discard unsaved changes to ${baseName(t.path)}?`)) return;
+    }
+    closeTab(id);
   }
 
   async function saveFile() {
@@ -137,11 +149,6 @@
     }
   }
 
-  async function confirmDiscard(): Promise<boolean> {
-    if (!isDirty) return true;
-    return confirm(`Discard unsaved changes to ${displayName}?`);
-  }
-
   function toggleMode() {
     mode = mode === 'view' ? 'edit' : 'view';
   }
@@ -166,6 +173,7 @@
     else if (k === 'n') { e.preventDefault(); newFile(); }
     else if (k === 'e') { e.preventDefault(); toggleMode(); }
     else if (k === 'b' || k === '\\') { e.preventDefault(); togglePanel(); }
+    else if (k === 'w') { e.preventDefault(); if (tabs.activeId) requestCloseTab(tabs.activeId); }
     else if (k === '=' || k === '+') { e.preventDefault(); zoomIn(); }
     else if (k === '-' || k === '_') { e.preventDefault(); zoomOut(); }
     else if (k === '0') { e.preventDefault(); zoomReset(); }
@@ -190,15 +198,41 @@
     editorApi?.scrollToLine(line);
   }
 
+  function isMarkdownPath(p: string): boolean {
+    return /\.(md|markdown)$/i.test(p);
+  }
+
   onMount(() => {
     window.addEventListener('keydown', handleKey);
     window.addEventListener('wheel', handleWheel, { passive: false });
-    const unlisten = listen<string>('open-file', (ev) => openFile(ev.payload));
+
+    const unlistenOpen = listen<string>('open-file', (ev) => openFile(ev.payload));
+
+    const dragDropPromise = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === 'drop') {
+        for (const p of event.payload.paths) {
+          if (isMarkdownPath(p)) openFile(p);
+        }
+      }
+    });
+
+    (async () => {
+      try {
+        const pending = await invoke<string[]>('take_pending_files');
+        for (const p of pending) {
+          if (isMarkdownPath(p)) await openFile(p);
+        }
+      } catch (err) {
+        console.error('take_pending_files failed:', err);
+      }
+    })();
+
     return () => {
       window.removeEventListener('keydown', handleKey);
       window.removeEventListener('wheel', handleWheel);
       if (zoomToastTimer) clearTimeout(zoomToastTimer);
-      unlisten.then(f => f());
+      unlistenOpen.then((f) => f());
+      dragDropPromise.then((f) => f());
     };
   });
 
@@ -309,21 +343,50 @@
   </aside>
 
   <div class="content">
-    {#if mode === 'view'}
-      <div class="single">
-        <Preview onReady={(api) => (previewApi = api)} />
-      </div>
-    {:else}
-      <div class="split">
-        <div class="pane">
-          <Editor onScroll={onEditorScroll} onReady={(api) => (editorApi = api)} />
+    <div class="tabbar" role="tablist" aria-label="Open files">
+      {#each tabs.items as t (t.id)}
+        <div
+          class="tab"
+          class:active={t.id === tabs.activeId}
+          role="tab"
+          aria-selected={t.id === tabs.activeId}
+          tabindex="0"
+          title={t.path ?? 'Untitled'}
+          onclick={() => activateTab(t.id)}
+          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateTab(t.id); } }}
+        >
+          {#if t.content !== t.saved}<span class="dot" aria-label="unsaved">●</span>{/if}
+          <span class="tab-name">{baseName(t.path)}</span>
+          <span
+            class="tab-close"
+            role="button"
+            tabindex="0"
+            aria-label="Close tab"
+            title="Close"
+            onclick={(e) => { e.stopPropagation(); requestCloseTab(t.id); }}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); requestCloseTab(t.id); } }}
+          >×</span>
         </div>
-        <div class="divider"></div>
-        <div class="pane">
-          <Preview onScroll={onPreviewScroll} onReady={(api) => (previewApi = api)} />
+      {/each}
+      <button class="tab-new" onclick={newFile} title="New tab (Ctrl/Cmd+N)" aria-label="New tab">+</button>
+    </div>
+    <div class="content-body">
+      {#if mode === 'view'}
+        <div class="single">
+          <Preview onReady={(api) => (previewApi = api)} />
         </div>
-      </div>
-    {/if}
+      {:else}
+        <div class="split">
+          <div class="pane">
+            <Editor onScroll={onEditorScroll} onReady={(api) => (editorApi = api)} />
+          </div>
+          <div class="divider"></div>
+          <div class="pane">
+            <Preview onScroll={onPreviewScroll} onReady={(api) => (previewApi = api)} />
+          </div>
+        </div>
+      {/if}
+    </div>
   </div>
 
   <div class="zoom-toast" class:on={zoomToastOn} aria-live="polite" aria-atomic="true">
@@ -608,21 +671,113 @@
     height: 100%;
     padding-left: var(--panel-offset, 0px);
     transition: padding-left 200ms ease;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
   .app.resizing .content {
     transition: none;
   }
+  .content-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .single {
-    height: 100%;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
   }
   .split {
     display: grid;
     grid-template-columns: 1fr 1px 1fr;
-    height: 100%;
+    flex: 1 1 auto;
     min-height: 0;
   }
   .pane { height: 100%; min-height: 0; overflow: hidden; }
   .divider { background: var(--border); }
+
+  /* Tab bar */
+  .tabbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 4px 4px 38px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--titlebar-bg) 80%, transparent);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    user-select: none;
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 4px 4px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--fg-muted);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 220px;
+  }
+  .tab:hover {
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+    color: var(--fg);
+  }
+  .tab.active {
+    background: var(--bg);
+    border-color: var(--border);
+    color: var(--fg);
+  }
+  .tab .tab-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 170px;
+  }
+  .tab .dot {
+    color: var(--accent);
+    font-size: 9px;
+    line-height: 1;
+  }
+  .tab .tab-close {
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    font-size: 14px;
+    line-height: 1;
+    color: var(--fg-muted);
+    opacity: 0.55;
+  }
+  .tab .tab-close:hover {
+    opacity: 1;
+    background: color-mix(in srgb, var(--fg) 14%, transparent);
+    color: var(--fg);
+  }
+  .tab-new {
+    margin-left: 2px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--fg-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .tab-new:hover {
+    background: var(--bg-alt);
+    border-color: var(--border);
+    color: var(--fg);
+  }
 </style>

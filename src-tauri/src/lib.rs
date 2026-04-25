@@ -1,6 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::{Emitter, Manager};
+
+struct AppState {
+    pending: Mutex<Vec<String>>,
+    frontend_ready: Mutex<bool>,
+}
 
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
@@ -10,6 +16,14 @@ fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| format!("Failed to write {path}: {e}"))
+}
+
+#[tauri::command]
+fn take_pending_files(state: tauri::State<AppState>) -> Vec<String> {
+    let mut ready = state.frontend_ready.lock().unwrap();
+    *ready = true;
+    let mut guard = state.pending.lock().unwrap();
+    std::mem::take(&mut *guard)
 }
 
 fn first_file_arg(args: impl IntoIterator<Item = String>) -> Option<String> {
@@ -25,6 +39,19 @@ fn emit_open_file(app: &tauri::AppHandle, path: &str) {
     }
 }
 
+fn dispatch_open_file(app: &tauri::AppHandle, path: &str) {
+    let state: tauri::State<AppState> = app.state();
+    let ready = *state.frontend_ready.lock().unwrap();
+    if ready {
+        emit_open_file(app, path);
+    } else {
+        state.pending.lock().unwrap().push(path.to_string());
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.set_focus();
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -33,7 +60,7 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(path) = first_file_arg(argv) {
-                emit_open_file(app, &path);
+                dispatch_open_file(app, &path);
             } else if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_focus();
             }
@@ -41,12 +68,21 @@ pub fn run() {
     }
 
     builder
+        .manage(AppState {
+            pending: Mutex::new(Vec::new()),
+            frontend_ready: Mutex::new(false),
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![read_text_file, write_text_file])
+        .invoke_handler(tauri::generate_handler![
+            read_text_file,
+            write_text_file,
+            take_pending_files
+        ])
         .setup(|app| {
             if let Some(path) = first_file_arg(std::env::args()) {
-                emit_open_file(app.handle(), &path);
+                let state: tauri::State<AppState> = app.state();
+                state.pending.lock().unwrap().push(path);
             }
             Ok(())
         })
@@ -58,7 +94,7 @@ pub fn run() {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
                         if let Some(s) = path.to_str() {
-                            emit_open_file(_app_handle, s);
+                            dispatch_open_file(_app_handle, s);
                         }
                     }
                 }

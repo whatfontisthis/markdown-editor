@@ -6,7 +6,7 @@
   import { markdown } from '@codemirror/lang-markdown';
   import { bracketMatching, indentOnInput } from '@codemirror/language';
   import { appleDark, appleLight } from './cmTheme';
-  import { file } from './fileState.svelte';
+  import { file, tabs } from './fileState.svelte';
   import { theme } from './theme.svelte';
 
   type Api = { scrollToLine: (line: number) => void };
@@ -51,6 +51,7 @@
       state: EditorState.create({ doc: file.content, extensions: extensions() }),
       parent: container
     });
+    lastTabId = tabs.activeId;
     onReady?.({
       scrollToLine(line: number) {
         if (!view) return;
@@ -65,8 +66,16 @@
 
   onDestroy(() => view?.destroy());
 
+  let lastTabId: string | null = null;
+
   $effect(() => {
     if (!view) return;
+    const curId = tabs.activeId;
+    if (curId !== lastTabId) {
+      lastTabId = curId;
+      view.setState(EditorState.create({ doc: file.content, extensions: extensions() }));
+      return;
+    }
     if (view.state.doc.toString() !== file.content) {
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: file.content }

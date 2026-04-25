@@ -1,0 +1,106 @@
+name: Auto bump version
+
+# On push to main, bump the version, commit, tag, and trigger the release
+# workflow to build installers. Skip when:
+#   - the head commit is a Bump commit (avoid recursion)
+#   - the commit message contains [skip release]
+#   - only files outside the paths filter changed
+#
+# Bump kind:
+#   - default: patch
+#   - commit message contains [minor]: minor
+#   - commit message contains [major]: major
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  bump:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      !startsWith(github.event.head_commit.message, 'Bump to v') &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine bump kind
+        id: kind
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if printf '%s' "$MSG" | grep -qE '\[major\]'; then
+            echo "kind=major" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$MSG" | grep -qE '\[minor\]'; then
+            echo "kind=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "kind=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump versions
+        id: bump
+        env:
+          KIND: ${{ steps.kind.outputs.kind }}
+        run: |
+          set -euo pipefail
+          CUR=$(node -p "require('./package.json').version")
+          IFS=. read -r MAJ MIN PAT <<< "$CUR"
+          case "$KIND" in
+            major) NEW="$((MAJ + 1)).0.0" ;;
+            minor) NEW="$MAJ.$((MIN + 1)).0" ;;
+            *)     NEW="$MAJ.$MIN.$((PAT + 1))" ;;
+          esac
+          echo "Bumping $CUR -> $NEW ($KIND)"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+          # JSON files (preserve 2-space formatting + trailing newline)
+          node -e "
+            const fs = require('fs');
+            for (const f of ['package.json', 'package-lock.json', 'src-tauri/tauri.conf.json']) {
+              const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+              if (j.version) j.version = '$NEW';
+              if (j.packages && j.packages[''] && j.packages[''].version) {
+                j.packages[''].version = '$NEW';
+              }
+              fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+            }
+          "
+
+          # Cargo.toml — only the [package] section's version (first occurrence)
+          sed -i -E "0,/^version = \"[0-9.]+\"/{s//version = \"$NEW\"/}" src-tauri/Cargo.toml
+
+          # Cargo.lock — markdown-editor's entry only (find by name, then bump next line)
+          sed -i -E "/^name = \"markdown-editor\"$/{n;s/^version = \"[0-9.]+\"$/version = \"$NEW\"/}" src-tauri/Cargo.lock
+
+      - name: Commit, tag, push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW: ${{ steps.bump.outputs.new }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Bump to v$NEW"
+          git tag -a "v$NEW" -m "Release v$NEW"
+          git push origin HEAD:main
+          git push origin "v$NEW"
+
+      - name: Trigger release workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW: ${{ steps.bump.outputs.new }}
+        # GITHUB_TOKEN tag pushes don't fire downstream `push` workflows, so
+        # invoke release.yml explicitly via workflow_dispatch on the new tag.
+        run: gh workflow run release.yml --ref "v$NEW"
